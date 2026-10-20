@@ -1,3 +1,9 @@
 [build]
   publish = "www"
   command = ""
+
+[[headers]]
+  for = "/*.apk"
+  [headers.values]
+    Content-Type = "application/vnd.android.package-archive"
+    Content-Disposition = "attachment; filename=bikemy.apk"

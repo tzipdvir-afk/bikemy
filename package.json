@@ -13,5 +13,8 @@
   },
   "devDependencies": {
     "@capacitor/cli": "^7.6.9"
+  },
+  "scripts": {
+    "sync": "node scripts/prep-app.mjs && cap sync android"
   }
 }

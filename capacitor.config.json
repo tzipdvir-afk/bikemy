@@ -1,7 +1,7 @@
 {
   "appId": "com.tzipdvir.bikemy",
   "appName": "מד נסיעות",
-  "webDir": "www",
+  "webDir": "build/app",
   "android": {
     "useLegacyBridge": true
   }
