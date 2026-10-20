@@ -1,0 +1,408 @@
+<!doctype html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#16323a">
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="icon" href="/favicon.ico" sizes="any">
+<link rel="icon" type="image/png" sizes="48x48" href="/icons/favicon-48.png">
+<link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
+<title>מד נסיעות אופניים</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Rubik:wght@400;500;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<style>
+:root{
+  --bg:#eef2f1; --surface:#ffffff; --ink:#16323a; --muted:#5d7176;
+  --line:#cfd9d8; --go:#f2c418; --go-ink:#16323a; --stop:#c8412b; --route:#1f6fd1;
+  color-scheme:light;
+  box-sizing:border-box;
+  padding-top:env(safe-area-inset-top,0px); padding-bottom:env(safe-area-inset-bottom,0px);
+}
+@media (prefers-color-scheme:dark){
+  :root{--bg:#0f1d21; --surface:#17292e; --ink:#e7efee; --muted:#9db0b3; --line:#2b4248; --go:#f2c418; --go-ink:#16323a; --stop:#e0604a; --route:#5aa2ff; color-scheme:dark;}
+}
+*,*::before,*::after{box-sizing:inherit}
+html,body{margin:0;background:var(--bg);color:var(--ink);font-family:Rubik,"Segoe UI",Arial,sans-serif;font-size:16px}
+header{display:flex;align-items:center;justify-content:space-between;padding:10px 14px;background:var(--ink);color:var(--bg)}
+header h1{font-size:1.1rem;margin:0;font-weight:700}
+nav{display:flex;gap:4px}
+nav button{background:transparent;color:var(--bg);border:1px solid transparent;padding:6px 12px;border-radius:6px;font:inherit;cursor:pointer;opacity:.75}
+nav button.on{border-color:var(--go);opacity:1}
+#mapwrap{position:relative;height:42vh;min-height:240px}
+#map{height:100%;width:100%}
+#center{position:absolute;bottom:12px;left:12px;z-index:500;width:44px;height:44px;border-radius:50%;border:1px solid var(--line);background:var(--surface);color:var(--ink);font-size:1.3rem;cursor:pointer}
+section{padding:14px;max-width:640px;margin:0 auto}
+.stats{display:grid;grid-template-columns:1fr 1fr;gap:1px;background:var(--line);border:1px solid var(--line);border-radius:10px;overflow:hidden}
+.stats div{background:var(--surface);padding:10px 12px}
+.stats span{display:block;font-size:2rem;font-weight:700;font-variant-numeric:tabular-nums;direction:ltr;text-align:right}
+.stats small{color:var(--muted)}
+.muted{color:var(--muted);font-size:.9rem}
+#gps{margin:10px 0}
+.btns{display:flex;gap:8px;margin:12px 0}
+.btns.wrap{flex-wrap:wrap}
+button,.btn{font:inherit;padding:12px 14px;border-radius:8px;border:1px solid var(--line);background:var(--surface);color:var(--ink);cursor:pointer;text-align:center}
+.btns:not(.wrap) button{flex:1}
+button.primary{background:var(--go);color:var(--go-ink);border-color:var(--go);font-weight:700;font-size:1.15rem;padding:16px}
+button.danger{background:var(--stop);color:#fff;border-color:var(--stop);font-weight:700}
+button:focus-visible,.btn:focus-within{outline:3px solid var(--route);outline-offset:2px}
+#totals{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:10px 12px}
+ul{list-style:none;padding:0;margin:0}
+li.ride{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:8px}
+li.ride.sel{border-color:var(--route);box-shadow:inset 3px 0 0 var(--route)}
+.rtitle{font-weight:500}
+.rnums{display:flex;gap:14px;margin:4px 0 8px;font-variant-numeric:tabular-nums}
+.ract{display:flex;gap:6px;flex-wrap:wrap}
+.ract button{padding:6px 10px;font-size:.9rem}
+.empty{text-align:center;padding:24px 8px;color:var(--muted)}
+</style>
+</head>
+<body>
+<header>
+  <h1>🚲 מד נסיעות</h1>
+  <nav>
+    <button data-tab="rec" class="on">הקלטה</button>
+    <button data-tab="list">הנסיעות שלי</button>
+  </nav>
+</header>
+
+<div id="mapwrap" dir="ltr"><div id="map"></div><button id="center" title="מרכז על המיקום שלי">◎</button></div>
+
+<section id="rec">
+  <div class="stats">
+    <div><span id="lDist">0.00</span><small>ק"מ</small></div>
+    <div><span id="lTime">0:00:00</span><small>זמן רכיבה</small></div>
+    <div><span id="lAvg">0.0</span><small>מהירות ממוצעת (קמ"ש)</small></div>
+    <div><span id="lSpd">–</span><small>מהירות כרגע (קמ"ש)</small></div>
+  </div>
+  <div id="gps" class="muted">GPS: לא פעיל</div>
+  <div class="btns">
+    <button id="bStart" class="primary">התחל נסיעה</button>
+    <button id="bPause" hidden>השהה</button>
+    <button id="bStop" class="danger" hidden>סיים ושמור</button>
+  </div>
+  <p class="muted">במהלך הנסיעה השאר את הכלי פתוח על המסך. הכלי מונע מהמסך להיכבות, אבל אם תעבור לאפליקציה אחרת או תנעל את הטלפון, ההקלטה תיעצר עד שתחזור.</p>
+</section>
+
+<section id="list" hidden>
+  <div id="totals"></div>
+  <div class="btns wrap">
+    <label class="btn">ייבוא GPX<input type="file" id="fImp" multiple hidden></label>
+    <button id="eSum">ייצוא CSV סיכום</button>
+    <button id="ePts">ייצוא CSV נקודות</button>
+    <button id="eGpx">ייצוא GPX של הכל</button>
+    <button id="bAll">כל הנסיעות במפה</button>
+  </div>
+  <ul id="rides"></ul>
+</section>
+
+<script>
+const LS = 'bikeRides_v1', CUR = 'bikeCurrent_v1';
+const $ = id => document.getElementById(id);
+
+/* ---------- storage ---------- */
+let rides = [];
+try { rides = JSON.parse(localStorage.getItem(LS)) || []; } catch (e) { rides = []; }
+function save() {
+  try { localStorage.setItem(LS, JSON.stringify(rides)); }
+  catch (e) { alert('האחסון במכשיר מלא. ייצא GPX של הכל כגיבוי ומחק נסיעות ישנות.'); }
+}
+
+/* ---------- math ---------- */
+// point format: [lat, lon, timeMs|null, ele|null, segment]
+function hav(a, b) {
+  const r = Math.PI / 180, dLat = (b[0] - a[0]) * r, dLon = (b[1] - a[1]) * r;
+  const s = Math.sin(dLat / 2) ** 2 + Math.cos(a[0] * r) * Math.cos(b[0] * r) * Math.sin(dLon / 2) ** 2;
+  return 2 * 6371000 * Math.asin(Math.sqrt(s));
+}
+function dist(pts) {
+  let d = 0;
+  for (let i = 1; i < pts.length; i++) if (pts[i][4] === pts[i - 1][4]) d += hav(pts[i - 1], pts[i]);
+  return d;
+}
+function durFromPts(pts) {
+  let ms = 0;
+  for (let i = 1; i < pts.length; i++)
+    if (pts[i][4] === pts[i - 1][4] && pts[i][2] && pts[i - 1][2]) ms += pts[i][2] - pts[i - 1][2];
+  return ms;
+}
+function stats(r) {
+  const d = dist(r.points);
+  const ms = r.durMs != null ? r.durMs : durFromPts(r.points);
+  return { d, ms, avg: ms > 0 ? d / ms * 3600 : 0 };
+}
+const km = d => (d / 1000).toFixed(2);
+function hms(ms) {
+  const s = Math.floor(ms / 1000), h = Math.floor(s / 3600), m = Math.floor(s % 3600 / 60), x = s % 60;
+  return h + ':' + String(m).padStart(2, '0') + ':' + String(x).padStart(2, '0');
+}
+const dateStr = t => new Date(t).toLocaleDateString('he-IL') + ' ' + new Date(t).toLocaleTimeString('he-IL', { hour: '2-digit', minute: '2-digit' });
+const rideName = r => r.name || ('נסיעה ' + dateStr(r.start));
+
+/* ---------- map ---------- */
+const map = L.map('map', { zoomControl: true }).setView([32.08, 34.78], 13);
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '© OpenStreetMap' }).addTo(map);
+const layer = L.layerGroup().addTo(map);
+const routeColor = () => getComputedStyle(document.documentElement).getPropertyValue('--route').trim() || '#1f6fd1';
+let follow = true, posMarker = null, livePoly = null;
+map.on('dragstart', () => follow = false);
+$('center').onclick = () => { follow = true; if (posMarker) map.setView(posMarker.getLatLng(), Math.max(map.getZoom(), 16)); else locateOnce(); };
+
+function locateOnce() {
+  navigator.geolocation && navigator.geolocation.getCurrentPosition(
+    p => { setPos(p.coords); map.setView([p.coords.latitude, p.coords.longitude], 16); },
+    () => {}, { enableHighAccuracy: true, timeout: 15000 });
+}
+function setPos(c) {
+  const ll = [c.latitude, c.longitude];
+  if (!posMarker) posMarker = L.circleMarker(ll, { radius: 8, color: '#fff', weight: 3, fillColor: routeColor(), fillOpacity: 1 }).addTo(map);
+  else posMarker.setLatLng(ll);
+}
+function drawRides(list) {
+  layer.clearLayers();
+  const all = [];
+  list.forEach(r => {
+    const segs = {};
+    r.points.forEach(p => (segs[p[4]] = segs[p[4]] || []).push([p[0], p[1]]));
+    Object.values(segs).forEach(s => { L.polyline(s, { color: routeColor(), weight: 5, opacity: .85 }).addTo(layer); all.push(...s); });
+    if (list.length === 1 && r.points.length) {
+      const a = r.points[0], b = r.points[r.points.length - 1];
+      L.circleMarker([a[0], a[1]], { radius: 7, color: '#fff', weight: 2, fillColor: '#2e9d4f', fillOpacity: 1 }).bindTooltip('התחלה').addTo(layer);
+      L.circleMarker([b[0], b[1]], { radius: 7, color: '#fff', weight: 2, fillColor: '#c8412b', fillOpacity: 1 }).bindTooltip('סיום').addTo(layer);
+    }
+  });
+  if (all.length) map.fitBounds(L.latLngBounds(all), { padding: [24, 24] });
+}
+
+/* ---------- wake lock ---------- */
+let wl = null;
+async function wake() { try { if ('wakeLock' in navigator) wl = await navigator.wakeLock.request('screen'); } catch (e) {} }
+function unwake() { try { wl && wl.release(); } catch (e) {} wl = null; }
+document.addEventListener('visibilitychange', () => { if (rec && document.visibilityState === 'visible') wake(); });
+
+/* ---------- recording ---------- */
+let rec = null, tick = null;
+function elapsed() { return rec ? rec.accMs + (rec.state === 'run' ? Date.now() - rec.segStart : 0) : 0; }
+
+function startRec() {
+  if (!navigator.geolocation) return alert('הדפדפן הזה לא תומך במיקום.');
+  const now = Date.now();
+  rec = { ride: { id: now.toString(36), name: '', start: now, points: [], source: 'live', durMs: 0 },
+          state: 'run', segStart: now, accMs: 0, seg: 0 };
+  layer.clearLayers();
+  livePoly = L.polyline([], { color: routeColor(), weight: 5 }).addTo(layer);
+  follow = true;
+  rec.watchId = navigator.geolocation.watchPosition(onPos, onErr, { enableHighAccuracy: true, maximumAge: 0, timeout: 30000 });
+  wake();
+  tick = setInterval(updLive, 1000);
+  setButtons(); updLive();
+}
+function onPos(p) {
+  const c = p.coords;
+  setPos(c);
+  if (follow) map.setView([c.latitude, c.longitude], Math.max(map.getZoom(), 16));
+  $('gps').textContent = 'GPS: דיוק ±' + Math.round(c.accuracy) + ' מ׳' + (c.accuracy > 30 ? ' (חלש, ממתין לאות טוב יותר)' : '');
+  $('lSpd').textContent = c.speed != null && !isNaN(c.speed) ? (c.speed * 3.6).toFixed(1) : '–';
+  if (!rec || rec.state !== 'run' || c.accuracy > 30) return;
+  const pt = [+c.latitude.toFixed(6), +c.longitude.toFixed(6), p.timestamp || Date.now(),
+              c.altitude != null ? Math.round(c.altitude) : null, rec.seg];
+  const pts = rec.ride.points, last = pts[pts.length - 1];
+  if (last && last[4] === rec.seg) {
+    const dd = hav(last, pt), dt = (pt[2] - last[2]) / 1000;
+    if (dd < Math.max(5, c.accuracy * 0.5)) return;   // jitter while standing
+    if (dt > 0 && dd / dt > 25) return;               // jump > 90 km/h = GPS glitch
+  }
+  pts.push(pt);
+  if (rec.seg !== rec.polySeg) { livePoly = L.polyline([], { color: routeColor(), weight: 5 }).addTo(layer); rec.polySeg = rec.seg; }
+  livePoly.addLatLng([pt[0], pt[1]]);
+  persistCur();
+  updLive();
+}
+function onErr(e) {
+  $('gps').textContent = e.code === 1 ? 'GPS: אין הרשאת מיקום. אשר הרשאה בהגדרות האתר בכרום.' : 'GPS: אין אות כרגע (' + e.message + ')';
+}
+function persistCur() {
+  try { localStorage.setItem(CUR, JSON.stringify(Object.assign({}, rec.ride, { durMs: elapsed() }))); } catch (e) {}
+}
+function updLive() {
+  if (!rec) return;
+  const d = dist(rec.ride.points), ms = elapsed();
+  $('lDist').textContent = km(d);
+  $('lTime').textContent = hms(ms);
+  $('lAvg').textContent = ms > 0 ? (d / ms * 3600).toFixed(1) : '0.0';
+}
+function pauseRec() {
+  if (rec.state === 'run') { rec.accMs += Date.now() - rec.segStart; rec.state = 'pause'; rec.seg++; }
+  else { rec.segStart = Date.now(); rec.state = 'run'; }
+  setButtons(); updLive(); persistCur();
+}
+function stopRec() {
+  if (rec.state === 'run') rec.accMs += Date.now() - rec.segStart;
+  rec.ride.durMs = rec.accMs;
+  navigator.geolocation.clearWatch(rec.watchId);
+  clearInterval(tick); unwake();
+  const r = rec.ride; rec = null;
+  localStorage.removeItem(CUR);
+  if (r.points.length < 2) { alert('לא נקלטו מספיק נקודות GPS, הנסיעה לא נשמרה.'); }
+  else { rides.unshift(r); save(); renderList(); drawRides([r]); }
+  setButtons();
+  $('lSpd').textContent = '–'; $('gps').textContent = 'GPS: לא פעיל';
+}
+function setButtons() {
+  $('bStart').hidden = !!rec;
+  $('bPause').hidden = !rec; $('bStop').hidden = !rec;
+  if (rec) $('bPause').textContent = rec.state === 'run' ? 'השהה' : 'המשך';
+}
+$('bStart').onclick = startRec;
+$('bPause').onclick = pauseRec;
+$('bStop').onclick = () => { if (confirm('לסיים ולשמור את הנסיעה?')) stopRec(); };
+
+// recover a ride that was interrupted (tab closed / phone restarted)
+(function recover() {
+  try {
+    const c = JSON.parse(localStorage.getItem(CUR));
+    if (c && c.points && c.points.length >= 2) { rides.unshift(c); save(); alert('נמצאה נסיעה שלא נסגרה, היא נשמרה ברשימה.'); }
+  } catch (e) {}
+  localStorage.removeItem(CUR);
+})();
+
+/* ---------- list ---------- */
+let selected = null;
+function renderList() {
+  const ul = $('rides'); ul.innerHTML = '';
+  let tot = 0, totMs = 0;
+  rides.forEach(r => { const s = stats(r); tot += s.d; totMs += s.ms; });
+  $('totals').innerHTML = rides.length
+    ? `<strong>${rides.length}</strong> נסיעות · <strong>${km(tot)}</strong> ק"מ · <strong>${hms(totMs)}</strong> שעות רכיבה`
+    : 'עדיין אין נסיעות.';
+  if (!rides.length) { ul.innerHTML = '<li class="empty">התחל נסיעה בלשונית ההקלטה, או ייבא קובץ GPX מאפליקציה אחרת.</li>'; return; }
+  rides.forEach(r => {
+    const s = stats(r), li = document.createElement('li');
+    li.className = 'ride' + (selected === r.id ? ' sel' : '');
+    li.innerHTML = `<div class="rtitle"></div>
+      <div class="muted">${dateStr(r.start)}${r.source === 'gpx' ? ' · מיובא' : ''}</div>
+      <div class="rnums"><span><b>${km(s.d)}</b> ק"מ</span><span><b>${hms(s.ms)}</b></span><span><b>${s.avg.toFixed(1)}</b> קמ"ש</span></div>
+      <div class="ract"><button data-a="show">הצג במפה</button><button data-a="name">שנה שם</button><button data-a="gpx">GPX</button><button data-a="del">מחק</button></div>`;
+    li.querySelector('.rtitle').textContent = rideName(r);
+    li.querySelector('.ract').onclick = e => {
+      const a = e.target.dataset.a; if (!a) return;
+      if (a === 'show') { selected = r.id; drawRides([r]); renderList(); window.scrollTo({ top: 0, behavior: 'smooth' }); }
+      if (a === 'name') { const n = prompt('שם הנסיעה:', r.name || ''); if (n !== null) { r.name = n.trim(); save(); renderList(); } }
+      if (a === 'gpx') download(fileBase(r) + '.gpx', toGPX([r]), 'application/gpx+xml');
+      if (a === 'del' && confirm('למחוק את "' + rideName(r) + '"?')) { rides = rides.filter(x => x !== r); save(); renderList(); layer.clearLayers(); }
+    };
+    ul.appendChild(li);
+  });
+}
+$('bAll').onclick = () => { selected = null; drawRides(rides); renderList(); window.scrollTo({ top: 0, behavior: 'smooth' }); };
+
+/* ---------- tabs ---------- */
+document.querySelectorAll('nav button').forEach(b => b.onclick = () => {
+  document.querySelectorAll('nav button').forEach(x => x.classList.toggle('on', x === b));
+  $('rec').hidden = b.dataset.tab !== 'rec';
+  $('list').hidden = b.dataset.tab !== 'list';
+  if (b.dataset.tab === 'list') renderList();
+  setTimeout(() => map.invalidateSize(), 50);
+});
+
+/* ---------- export ---------- */
+function download(name, text, type) {
+  const blob = new Blob([text], { type: type + ';charset=utf-8' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob); a.download = name;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+}
+const today = () => new Date().toISOString().slice(0, 10);
+const fileBase = r => 'ride-' + new Date(r.start).toISOString().slice(0, 16).replace(/[:T]/g, '-');
+const csvCell = v => { v = v == null ? '' : String(v); return /[",\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; };
+const csv = rows => '\ufeff' + rows.map(r => r.map(csvCell).join(',')).join('\n');
+
+$('eSum').onclick = () => {
+  if (!rides.length) return alert('אין נסיעות לייצא.');
+  const rows = [['ride_id', 'name', 'start_iso', 'date', 'distance_km', 'duration_sec', 'duration_hms', 'avg_kmh', 'source', 'points']];
+  rides.forEach(r => { const s = stats(r);
+    rows.push([r.id, rideName(r), new Date(r.start).toISOString(), new Date(r.start).toLocaleDateString('he-IL'),
+      km(s.d), Math.round(s.ms / 1000), hms(s.ms), s.avg.toFixed(2), r.source, r.points.length]); });
+  download('bike-summary-' + today() + '.csv', csv(rows), 'text/csv');
+};
+$('ePts').onclick = () => {
+  if (!rides.length) return alert('אין נסיעות לייצא.');
+  const rows = [['ride_id', 'ride_name', 'segment', 'time_iso', 'lat', 'lon', 'ele_m']];
+  rides.forEach(r => r.points.forEach(p => rows.push([r.id, rideName(r), p[4], p[2] ? new Date(p[2]).toISOString() : '', p[0], p[1], p[3]])));
+  download('bike-points-' + today() + '.csv', csv(rows), 'text/csv');
+};
+$('eGpx').onclick = () => { if (!rides.length) return alert('אין נסיעות לייצא.'); download('bike-all-' + today() + '.gpx', toGPX(rides), 'application/gpx+xml'); };
+
+const xmlEsc = s => String(s).replace(/[<>&"']/g, c => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;', "'": '&apos;' }[c]));
+function toGPX(list) {
+  let s = '<?xml version="1.0" encoding="UTF-8"?>\n<gpx version="1.1" creator="BikeTracker" xmlns="http://www.topografix.com/GPX/1/1">\n';
+  list.forEach(r => {
+    s += `<trk><name>${xmlEsc(rideName(r))}</name><desc>durMs=${r.durMs != null ? r.durMs : ''}</desc>\n`;
+    let seg = null;
+    r.points.forEach(p => {
+      if (p[4] !== seg) { if (seg !== null) s += '</trkseg>\n'; s += '<trkseg>\n'; seg = p[4]; }
+      s += `<trkpt lat="${p[0]}" lon="${p[1]}">${p[3] != null ? '<ele>' + p[3] + '</ele>' : ''}${p[2] ? '<time>' + new Date(p[2]).toISOString() + '</time>' : ''}</trkpt>\n`;
+    });
+    if (seg !== null) s += '</trkseg>\n';
+    s += '</trk>\n';
+  });
+  return s + '</gpx>\n';
+}
+
+/* ---------- import ---------- */
+const kids = (el, tag) => Array.from(el.getElementsByTagNameNS('*', tag));
+const child = (el, tag) => Array.from(el.children).find(c => c.localName === tag);
+function parseGPX(text, fname) {
+  const doc = new DOMParser().parseFromString(text, 'application/xml');
+  if (doc.getElementsByTagName('parsererror').length) throw new Error('הקובץ ' + fname + ' אינו GPX תקין');
+  const out = [];
+  const readPt = (p, seg) => {
+    const t = child(p, 'time'), e = child(p, 'ele');
+    return [+p.getAttribute('lat'), +p.getAttribute('lon'), t ? Date.parse(t.textContent) || null : null,
+            e ? Math.round(parseFloat(e.textContent)) : null, seg];
+  };
+  const make = (name, desc, pts) => {
+    if (pts.length < 2) return;
+    const m = desc && /durMs=(\d+)/.exec(desc);
+    out.push({ id: (Date.now() + out.length).toString(36) + Math.random().toString(36).slice(2, 5),
+      name: name || fname.replace(/\.gpx$/i, ''), start: pts[0][2] || Date.now(), points: pts,
+      source: 'gpx', durMs: m ? +m[1] : null });
+  };
+  kids(doc, 'trk').forEach(trk => {
+    const pts = [];
+    kids(trk, 'trkseg').forEach((sg, i) => kids(sg, 'trkpt').forEach(p => pts.push(readPt(p, i))));
+    const n = child(trk, 'name'), d = child(trk, 'desc');
+    make(n && n.textContent.trim(), d && d.textContent, pts);
+  });
+  if (!out.length) kids(doc, 'rte').forEach(rte => {
+    const n = child(rte, 'name');
+    make(n && n.textContent.trim(), null, kids(rte, 'rtept').map(p => readPt(p, 0)));
+  });
+  return out;
+}
+$('fImp').onchange = async e => {
+  let added = 0, skipped = 0;
+  for (const f of e.target.files) {
+    try {
+      parseGPX(await f.text(), f.name).forEach(r => {
+        const dup = rides.some(x => x.start === r.start && x.points.length === r.points.length);
+        if (dup) skipped++; else { rides.push(r); added++; }
+      });
+    } catch (err) { alert(err.message); }
+  }
+  rides.sort((a, b) => b.start - a.start);
+  save(); renderList();
+  alert('יובאו ' + added + ' נסיעות' + (skipped ? ', ' + skipped + ' כבר היו קיימות ודולגו' : '') + '.');
+  e.target.value = '';
+};
+
+/* ---------- init ---------- */
+renderList();
+locateOnce();
+</script>
+</body>
+</html>
