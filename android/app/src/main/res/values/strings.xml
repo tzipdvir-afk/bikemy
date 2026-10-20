@@ -1,0 +1,10 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">מד נסיעות</string>
+    <string name="title_activity_main">מד נסיעות</string>
+    <string name="package_name">com.tzipdvir.bikemy</string>
+    <string name="custom_url_scheme">com.tzipdvir.bikemy</string>
+    <string name="capacitor_background_geolocation_notification_channel_name">הקלטת נסיעה</string>
+    <string name="capacitor_background_geolocation_notification_icon">drawable/ic_tracking</string>
+    <string name="capacitor_background_geolocation_notification_color">#16323a</string>
+</resources>

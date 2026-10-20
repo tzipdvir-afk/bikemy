@@ -84,7 +84,12 @@ li.ride.sel{border-color:var(--route);box-shadow:inset 3px 0 0 var(--route)}
     <button id="bPause" hidden>השהה</button>
     <button id="bStop" class="danger" hidden>סיים ושמור</button>
   </div>
-  <p class="muted">במהלך הנסיעה השאר את הכלי פתוח על המסך. הכלי מונע מהמסך להיכבות, אבל אם תעבור לאפליקציה אחרת או תנעל את הטלפון, ההקלטה תיעצר עד שתחזור.</p>
+  <p class="muted" id="webNote">במהלך הנסיעה השאר את הכלי פתוח על המסך. הכלי מונע מהמסך להיכבות, אבל אם תעבור לאפליקציה אחרת או תנעל את הטלפון, ההקלטה תיעצר עד שתחזור.</p>
+  <div class="muted" id="appNote" hidden>
+    <p>ההקלטה ממשיכה גם כשהמסך נעול או כשאפליקציה אחרת פתוחה. בזמן הקלטה תופיע התראה "מקליט נסיעה".</p>
+    <p><b>בסמסונג חשוב לעשות פעם אחת:</b> הגדרות האפליקציה ← סוללה ← <b>ללא הגבלה</b>. אחרת הטלפון עלול לעצור את ההקלטה באמצע.</p>
+    <button id="bSettings">פתח את הגדרות האפליקציה</button>
+  </div>
 </section>
 
 <section id="list" hidden>
@@ -102,6 +107,16 @@ li.ride.sel{border-color:var(--route);box-shadow:inset 3px 0 0 var(--route)}
 <script>
 const LS = 'bikeRides_v1', CUR = 'bikeCurrent_v1';
 const $ = id => document.getElementById(id);
+
+/* ---------- native app (Capacitor) ---------- */
+// Same file runs as a website and inside the Android app; in the app, GPS goes through a foreground service so it keeps recording in the background.
+const NATIVE = !!(window.Capacitor && Capacitor.isNativePlatform && Capacitor.isNativePlatform());
+const plug = n => NATIVE ? Capacitor.registerPlugin(n) : null;
+const BG = plug('BackgroundGeolocation'), FS = plug('Filesystem'), SHARE = plug('Share'), NOTIF = plug('LocalNotifications');
+if (NATIVE) {
+  $('webNote').hidden = true; $('appNote').hidden = false;
+  $('bSettings').onclick = () => BG.openSettings();
+}
 
 /* ---------- storage ---------- */
 let rides = [];
@@ -179,7 +194,7 @@ function drawRides(list) {
 
 /* ---------- wake lock ---------- */
 let wl = null;
-async function wake() { try { if ('wakeLock' in navigator) wl = await navigator.wakeLock.request('screen'); } catch (e) {} }
+async function wake() { try { if (!NATIVE && 'wakeLock' in navigator) wl = await navigator.wakeLock.request('screen'); } catch (e) {} }
 function unwake() { try { wl && wl.release(); } catch (e) {} wl = null; }
 document.addEventListener('visibilitychange', () => { if (rec && document.visibilityState === 'visible') wake(); });
 
@@ -195,7 +210,8 @@ function startRec() {
   layer.clearLayers();
   livePoly = L.polyline([], { color: routeColor(), weight: 5 }).addTo(layer);
   follow = true;
-  rec.watchId = navigator.geolocation.watchPosition(onPos, onErr, { enableHighAccuracy: true, maximumAge: 0, timeout: 30000 });
+  if (NATIVE) startNativeWatch();
+  else rec.watchId = navigator.geolocation.watchPosition(onPos, onErr, { enableHighAccuracy: true, maximumAge: 0, timeout: 30000 });
   wake();
   tick = setInterval(updLive, 1000);
   setButtons(); updLive();
@@ -221,6 +237,29 @@ function onPos(p) {
   persistCur();
   updLive();
 }
+async function startNativeWatch() {
+  // Android 13+ hides the "recording" notification without this permission (recording itself still works)
+  try { await NOTIF.requestPermissions(); } catch (e) {}
+  if (!rec) return;
+  rec.watchP = BG.addWatcher({
+    backgroundTitle: '🚲 מקליט נסיעה',
+    backgroundMessage: 'לחץ כדי לחזור לאפליקציה',
+    requestPermissions: true, stale: false, distanceFilter: 0
+  }, (loc, err) => {
+    if (err) {
+      if (err.code === 'NOT_AUTHORIZED') {
+        $('gps').textContent = 'GPS: אין הרשאת מיקום.';
+        if (confirm('האפליקציה צריכה הרשאת מיקום כדי להקליט. לפתוח את ההגדרות?')) BG.openSettings();
+      } else $('gps').textContent = 'GPS: אין אות כרגע (' + (err.message || err.code) + ')';
+      return;
+    }
+    if (loc) onPos({ coords: loc, timestamp: loc.time });
+  });
+}
+function stopWatch(r) {
+  if (NATIVE) { if (r.watchP) r.watchP.then(id => BG.removeWatcher({ id })).catch(() => {}); }
+  else navigator.geolocation.clearWatch(r.watchId);
+}
 function onErr(e) {
   $('gps').textContent = e.code === 1 ? 'GPS: אין הרשאת מיקום. אשר הרשאה בהגדרות האתר בכרום.' : 'GPS: אין אות כרגע (' + e.message + ')';
 }
@@ -242,7 +281,7 @@ function pauseRec() {
 function stopRec() {
   if (rec.state === 'run') rec.accMs += Date.now() - rec.segStart;
   rec.ride.durMs = rec.accMs;
-  navigator.geolocation.clearWatch(rec.watchId);
+  stopWatch(rec);
   clearInterval(tick); unwake();
   const r = rec.ride; rec = null;
   localStorage.removeItem(CUR);
@@ -309,7 +348,15 @@ document.querySelectorAll('nav button').forEach(b => b.onclick = () => {
 });
 
 /* ---------- export ---------- */
-function download(name, text, type) {
+async function download(name, text, type) {
+  if (NATIVE) {
+    // the app's WebView can't do <a download>; save to cache and open the Android share sheet instead
+    try {
+      const f = await FS.writeFile({ path: name, data: text, directory: 'CACHE', encoding: 'utf8' });
+      await SHARE.share({ title: name, url: f.uri });
+    } catch (e) { if (!/cancel/i.test(e.message || '')) alert('הייצוא נכשל: ' + (e.message || e)); }
+    return;
+  }
   const blob = new Blob([text], { type: type + ';charset=utf-8' });
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob); a.download = name;
