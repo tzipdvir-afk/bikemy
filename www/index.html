@@ -116,13 +116,14 @@ li.period.open{border-color:var(--route)}
   <div id="getApp" class="getapp" hidden>
     <b>📱 יש אפליקציה לאנדרואיד</b>
     <span>היא ממשיכה להקליט גם כשהמסך נעול או כשאפליקציה אחרת פתוחה.</span>
-    <a class="btn" href="/bikemy.apk" download>הורד את האפליקציה</a>
+    <a class="btn" href="/bikemy.apk" download>הורד את האפליקציה<span id="apkVer"></span></a>
     <small>בהתקנה הראשונה הטלפון יבקש לאשר "התקנה ממקור לא ידוע". זה רגיל לאפליקציה שלא הגיעה מחנות Google Play.</small>
   </div>
   <div class="muted" id="appNote" hidden>
     <p>ההקלטה ממשיכה גם כשהמסך נעול או כשאפליקציה אחרת פתוחה. בזמן הקלטה תופיע התראה "מקליט נסיעה".</p>
     <p><b>בסמסונג חשוב לעשות פעם אחת:</b> הגדרות האפליקציה ← סוללה ← <b>ללא הגבלה</b>. אחרת הטלפון עלול לעצור את ההקלטה באמצע.</p>
     <button id="bSettings">פתח את הגדרות האפליקציה</button>
+    <p><small id="myVer"></small></p>
   </div>
 </section>
 
@@ -158,12 +159,17 @@ if (NATIVE) {
   $('webNote').hidden = true; $('appNote').hidden = false;
   $('bSettings').onclick = () => BG.openSettings();
   checkUpdate();
-} else if (!/iPhone|iPad|iPod/i.test(navigator.userAgent)) $('getApp').hidden = false;
+} else if (!/iPhone|iPad|iPod/i.test(navigator.userAgent)) {
+  $('getApp').hidden = false;
+  fetch('/version.json', { cache: 'no-store' }).then(r => r.json())
+    .then(v => { $('apkVer').textContent = ' (גרסה ' + v.versionName + ')'; }).catch(() => {});
+}
 
 // the site's version.json is written from android/app/build.gradle at build time (scripts/prep-app.mjs)
 async function checkUpdate() {
   try {
     const info = await APP.getInfo();
+    $('myVer').textContent = 'גרסה מותקנת: ' + info.version;
     const v = await (await fetch('https://bikemy.netlify.app/version.json', { cache: 'no-store' })).json();
     if (+v.versionCode > +info.build) {
       $('updTxt').textContent = '🆕 גרסה ' + v.versionName + ' זמינה (מותקנת אצלך ' + info.version + ')';
