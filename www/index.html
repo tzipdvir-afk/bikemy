@@ -63,6 +63,21 @@ li.ride.sel{border-color:var(--route);box-shadow:inset 3px 0 0 var(--route)}
 .getapp{display:flex;flex-direction:column;gap:6px;background:var(--surface);border:1px solid var(--line);border-inline-start:4px solid var(--go);border-radius:10px;padding:12px 14px;margin-top:12px}
 .getapp a.btn{background:var(--go);color:var(--go-ink);border-color:var(--go);font-weight:700;text-decoration:none;margin-top:4px}
 .getapp small{color:var(--muted)}
+#upd{margin:10px 14px 0}
+.toggle{display:flex;align-items:center;gap:10px;background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin:10px 0;cursor:pointer}
+.toggle input{width:22px;height:22px;accent-color:var(--route);margin:0}
+.automsg{background:var(--surface);border:1px solid var(--go);border-radius:10px;padding:10px 12px;margin:10px 0}
+.seg{display:flex;border:1px solid var(--line);border-radius:10px;overflow:hidden;margin:12px 0}
+.seg button{flex:1;border:0;border-radius:0;padding:10px 4px;background:var(--surface)}
+.seg button+button{border-inline-start:1px solid var(--line)}
+.seg button.on{background:var(--ink);color:var(--bg);font-weight:500}
+li.period{background:var(--surface);border:1px solid var(--line);border-radius:10px;margin-bottom:8px;overflow:hidden}
+li.period.open{border-color:var(--route)}
+.phead{display:block;width:100%;text-align:start;border:0;border-radius:0;background:transparent;padding:10px 12px}
+.phead .rnums{margin-bottom:0}
+.pbody{padding:0 12px 4px}
+.pbody .ract{margin-bottom:10px}
+.pbody li.ride{border-style:dashed}
 </style>
 </head>
 <body>
@@ -74,6 +89,12 @@ li.ride.sel{border-color:var(--route);box-shadow:inset 3px 0 0 var(--route)}
   </nav>
 </header>
 
+<div id="upd" class="getapp" hidden>
+  <b id="updTxt">יש גרסה חדשה של האפליקציה</b>
+  <a class="btn" href="https://bikemy.netlify.app/bikemy.apk">עדכן</a>
+  <small>הנסיעות שלך נשמרות. אם ההתקנה נחסמת, כבה זמנית את "חוסם אוטומטי" בהגדרות האבטחה.</small>
+</div>
+
 <div id="mapwrap" dir="ltr"><div id="map"></div><button id="center" title="מרכז על המיקום שלי">◎</button></div>
 
 <section id="rec">
@@ -84,6 +105,8 @@ li.ride.sel{border-color:var(--route);box-shadow:inset 3px 0 0 var(--route)}
     <div><span id="lSpd">–</span><small>מהירות כרגע (קמ"ש)</small></div>
   </div>
   <div id="gps" class="muted">GPS: לא פעיל</div>
+  <div id="autoMsg" class="automsg" hidden></div>
+  <label class="toggle"><input type="checkbox" id="tAwake"> השאר מסך דולק בזמן הקלטה</label>
   <div class="btns">
     <button id="bStart" class="primary">התחל נסיעה</button>
     <button id="bPause" hidden>השהה</button>
@@ -105,6 +128,12 @@ li.ride.sel{border-color:var(--route);box-shadow:inset 3px 0 0 var(--route)}
 
 <section id="list" hidden>
   <div id="totals"></div>
+  <div class="seg" id="seg">
+    <button data-m="rides">כל הנסיעות</button>
+    <button data-m="day">יום</button>
+    <button data-m="week">שבוע</button>
+    <button data-m="month">חודש</button>
+  </div>
   <div class="btns wrap">
     <label class="btn">ייבוא GPX<input type="file" id="fImp" multiple hidden></label>
     <button id="eSum">ייצוא CSV סיכום</button>
@@ -124,10 +153,34 @@ const $ = id => document.getElementById(id);
 const NATIVE = !!(window.Capacitor && Capacitor.isNativePlatform && Capacitor.isNativePlatform());
 const plug = n => NATIVE ? Capacitor.registerPlugin(n) : null;
 const BG = plug('BackgroundGeolocation'), FS = plug('Filesystem'), SHARE = plug('Share'), NOTIF = plug('LocalNotifications');
+const KEEP = plug('KeepAwake'), HAP = plug('Haptics'), APP = plug('App');
 if (NATIVE) {
   $('webNote').hidden = true; $('appNote').hidden = false;
   $('bSettings').onclick = () => BG.openSettings();
+  checkUpdate();
 } else if (!/iPhone|iPad|iPod/i.test(navigator.userAgent)) $('getApp').hidden = false;
+
+// the site's version.json is written from android/app/build.gradle at build time (scripts/prep-app.mjs)
+async function checkUpdate() {
+  try {
+    const info = await APP.getInfo();
+    const v = await (await fetch('https://bikemy.netlify.app/version.json', { cache: 'no-store' })).json();
+    if (+v.versionCode > +info.build) {
+      $('updTxt').textContent = '🆕 גרסה ' + v.versionName + ' זמינה (מותקנת אצלך ' + info.version + ')';
+      $('upd').hidden = false;
+    }
+  } catch (e) {}
+}
+
+const lsGet = (k, d) => { try { const v = localStorage.getItem(k); return v === null ? d : v; } catch (e) { return d; } };
+const lsSet = (k, v) => { try { localStorage.setItem(k, v); } catch (e) {} };
+
+function buzz() {
+  try {
+    if (NATIVE) { HAP.vibrate({ duration: 400 }); setTimeout(() => HAP.vibrate({ duration: 400 }), 700); }
+    else if (navigator.vibrate) navigator.vibrate([400, 300, 400]);
+  } catch (e) {}
+}
 
 /* ---------- storage ---------- */
 let rides = [];
@@ -204,9 +257,20 @@ function drawRides(list) {
 }
 
 /* ---------- wake lock ---------- */
-let wl = null;
-async function wake() { try { if (!NATIVE && 'wakeLock' in navigator) wl = await navigator.wakeLock.request('screen'); } catch (e) {} }
-function unwake() { try { wl && wl.release(); } catch (e) {} wl = null; }
+let wl = null, awakeOn = lsGet('bikeAwake', '1') === '1';
+$('tAwake').checked = awakeOn;
+$('tAwake').onchange = e => {
+  awakeOn = e.target.checked; lsSet('bikeAwake', awakeOn ? '1' : '0');
+  if (rec) awakeOn ? wake() : unwake();
+};
+async function wake() {
+  if (!awakeOn) return;
+  try {
+    if (NATIVE) await KEEP.keepAwake();
+    else if ('wakeLock' in navigator) wl = await navigator.wakeLock.request('screen');
+  } catch (e) {}
+}
+function unwake() { try { if (NATIVE) KEEP.allowSleep(); else if (wl) wl.release(); } catch (e) {} wl = null; }
 document.addEventListener('visibilitychange', () => { if (rec && document.visibilityState === 'visible') wake(); });
 
 /* ---------- recording ---------- */
@@ -217,30 +281,68 @@ function startRec() {
   if (!navigator.geolocation) return alert('הדפדפן הזה לא תומך במיקום.');
   const now = Date.now();
   rec = { ride: { id: now.toString(36), name: '', start: now, points: [], source: 'live', durMs: 0 },
-          state: 'run', segStart: now, accMs: 0, seg: 0 };
+          state: 'run', segStart: now, accMs: 0, seg: 0, lastMove: now, auto: false };
+  showAuto('');
   layer.clearLayers();
   livePoly = L.polyline([], { color: routeColor(), weight: 5 }).addTo(layer);
   follow = true;
   if (NATIVE) startNativeWatch();
   else rec.watchId = navigator.geolocation.watchPosition(onPos, onErr, { enableHighAccuracy: true, maximumAge: 0, timeout: 30000 });
   wake();
-  tick = setInterval(updLive, 1000);
+  tick = setInterval(() => { checkIdle(); updLive(); }, 1000);
   setButtons(); updLive();
 }
+
+/* auto pause: no movement (under MOVE_KMH) for AUTO_PAUSE_MS → pause, resume by itself on movement;
+   still no movement AUTO_STOP_MS after the last movement → stop and save */
+const MOVE_KMH = 4, AUTO_PAUSE_MS = 3 * 60000, AUTO_STOP_MS = 15 * 60000;
+function showAuto(html) { $('autoMsg').innerHTML = html; $('autoMsg').hidden = !html; }
+function checkIdle() {
+  if (!rec || (rec.state === 'pause' && !rec.auto)) return;
+  const idle = Date.now() - rec.lastMove;
+  if (rec.state === 'run' && idle >= AUTO_PAUSE_MS) {
+    // the idle minutes don't count as riding time: the segment ends at the last movement
+    rec.accMs += Math.max(0, rec.lastMove - rec.segStart);
+    rec.state = 'pause'; rec.auto = true; rec.seg++;
+    buzz();
+    showAuto('⏸ <b>ההקלטה הושהתה</b>, כי לא זזת 3 דקות. היא תמשיך לבד כשתתחיל לרכוב, ותיעצר ותישמר אם לא תזוז עד ' +
+      new Date(rec.lastMove + AUTO_STOP_MS).toLocaleTimeString('he-IL', { hour: '2-digit', minute: '2-digit' }) + '.');
+    setButtons(); updLive(); persistCur();
+  } else if (rec.state === 'pause' && idle >= AUTO_STOP_MS) {
+    buzz();
+    stopRec(true);
+  }
+}
+function resumeRun() {
+  rec.segStart = rec.lastMove = Date.now(); rec.state = 'run'; rec.auto = false;
+  showAuto(''); setButtons();
+}
+
 function onPos(p) {
   const c = p.coords;
   setPos(c);
   if (follow) map.setView([c.latitude, c.longitude], Math.max(map.getZoom(), 16));
   $('gps').textContent = 'GPS: דיוק ±' + Math.round(c.accuracy) + ' מ׳' + (c.accuracy > 30 ? ' (חלש, ממתין לאות טוב יותר)' : '');
-  $('lSpd').textContent = c.speed != null && !isNaN(c.speed) ? (c.speed * 3.6).toFixed(1) : '–';
-  if (!rec || rec.state !== 'run' || c.accuracy > 30) return;
+  const kmh = c.speed != null && !isNaN(c.speed) ? c.speed * 3.6 : null;
+  $('lSpd').textContent = kmh != null ? kmh.toFixed(1) : '–';
+  if (!rec) return;
+  const good = c.accuracy <= 30;
   const pt = [+c.latitude.toFixed(6), +c.longitude.toFixed(6), p.timestamp || Date.now(),
               c.altitude != null ? Math.round(c.altitude) : null, rec.seg];
   const pts = rec.ride.points, last = pts[pts.length - 1];
+  if (rec.state === 'pause') {
+    // auto-paused: resume once really moving (GPS speed, or clearly away from where we stopped)
+    const away = last && hav(last, pt) > Math.max(30, c.accuracy);
+    if (!(rec.auto && good && ((kmh != null && kmh >= MOVE_KMH) || away))) return checkIdle();
+    resumeRun(); pt[4] = rec.seg;
+  }
+  if (kmh != null && kmh >= MOVE_KMH) rec.lastMove = Date.now();
+  if (!good) return checkIdle();
   if (last && last[4] === rec.seg) {
     const dd = hav(last, pt), dt = (pt[2] - last[2]) / 1000;
-    if (dd < Math.max(5, c.accuracy * 0.5)) return;   // jitter while standing
-    if (dt > 0 && dd / dt > 25) return;               // jump > 90 km/h = GPS glitch
+    if (dd < Math.max(5, c.accuracy * 0.5)) return checkIdle();   // jitter while standing
+    if (dt > 0 && dd / dt > 25) return;                           // jump > 90 km/h = GPS glitch
+    if (kmh == null && dt > 0 && dd / dt * 3.6 >= MOVE_KMH) rec.lastMove = Date.now();
   }
   pts.push(pt);
   if (rec.seg !== rec.polySeg) { livePoly = L.polyline([], { color: routeColor(), weight: 5 }).addTo(layer); rec.polySeg = rec.seg; }
@@ -285,19 +387,21 @@ function updLive() {
   $('lAvg').textContent = ms > 0 ? (d / ms * 3600).toFixed(1) : '0.0';
 }
 function pauseRec() {
-  if (rec.state === 'run') { rec.accMs += Date.now() - rec.segStart; rec.state = 'pause'; rec.seg++; }
-  else { rec.segStart = Date.now(); rec.state = 'run'; }
+  if (rec.state === 'run') { rec.accMs += Date.now() - rec.segStart; rec.state = 'pause'; rec.auto = false; rec.seg++; showAuto(''); }
+  else resumeRun();
   setButtons(); updLive(); persistCur();
 }
-function stopRec() {
+function stopRec(auto) {
   if (rec.state === 'run') rec.accMs += Date.now() - rec.segStart;
   rec.ride.durMs = rec.accMs;
   stopWatch(rec);
   clearInterval(tick); unwake();
   const r = rec.ride; rec = null;
   localStorage.removeItem(CUR);
-  if (r.points.length < 2) { alert('לא נקלטו מספיק נקודות GPS, הנסיעה לא נשמרה.'); }
-  else { rides.unshift(r); save(); renderList(); drawRides([r]); }
+  const ok = r.points.length >= 2;
+  if (ok) { rides.unshift(r); save(); renderList(); drawRides([r]); }
+  if (auto) showAuto(ok ? '⏹ <b>הנסיעה נעצרה ונשמרה אוטומטית</b>, אחרי 15 דקות בלי תנועה.' : '⏹ ההקלטה נעצרה אחרי 15 דקות בלי תנועה. לא נקלטו מספיק נקודות, אז הנסיעה לא נשמרה.');
+  else { showAuto(''); if (!ok) alert('לא נקלטו מספיק נקודות GPS, הנסיעה לא נשמרה.'); }
   setButtons();
   $('lSpd').textContent = '–'; $('gps').textContent = 'GPS: לא פעיל';
 }
@@ -328,25 +432,82 @@ function renderList() {
   $('totals').innerHTML = rides.length
     ? `<strong>${rides.length}</strong> נסיעות · <strong>${km(tot)}</strong> ק"מ · <strong>${hms(totMs)}</strong> שעות רכיבה`
     : 'עדיין אין נסיעות.';
+  document.querySelectorAll('#seg button').forEach(b => b.classList.toggle('on', b.dataset.m === mode));
   if (!rides.length) { ul.innerHTML = '<li class="empty">התחל נסיעה בלשונית ההקלטה, או ייבא קובץ GPX מאפליקציה אחרת.</li>'; return; }
-  rides.forEach(r => {
-    const s = stats(r), li = document.createElement('li');
-    li.className = 'ride' + (selected === r.id ? ' sel' : '');
-    li.innerHTML = `<div class="rtitle"></div>
-      <div class="muted">${dateStr(r.start)}${r.source === 'gpx' ? ' · מיובא' : ''}</div>
-      <div class="rnums"><span><b>${km(s.d)}</b> ק"מ</span><span><b>${hms(s.ms)}</b></span><span><b>${s.avg.toFixed(1)}</b> קמ"ש</span></div>
-      <div class="ract"><button data-a="show">הצג במפה</button><button data-a="name">שנה שם</button><button data-a="gpx">GPX</button><button data-a="del">מחק</button></div>`;
-    li.querySelector('.rtitle').textContent = rideName(r);
-    li.querySelector('.ract').onclick = e => {
-      const a = e.target.dataset.a; if (!a) return;
-      if (a === 'show') { selected = r.id; drawRides([r]); renderList(); window.scrollTo({ top: 0, behavior: 'smooth' }); }
-      if (a === 'name') { const n = prompt('שם הנסיעה:', r.name || ''); if (n !== null) { r.name = n.trim(); save(); renderList(); } }
-      if (a === 'gpx') download(fileBase(r) + '.gpx', toGPX([r]), 'application/gpx+xml');
-      if (a === 'del' && confirm('למחוק את "' + rideName(r) + '"?')) { rides = rides.filter(x => x !== r); save(); renderList(); layer.clearLayers(); }
+  if (mode === 'rides') rides.forEach(r => ul.appendChild(rideLi(r)));
+  else renderPeriods(ul);
+}
+function rideLi(r) {
+  const s = stats(r), li = document.createElement('li');
+  li.className = 'ride' + (selected === r.id ? ' sel' : '');
+  li.innerHTML = `<div class="rtitle"></div>
+    <div class="muted">${dateStr(r.start)}${r.source === 'gpx' ? ' · מיובא' : ''}</div>
+    <div class="rnums"><span><b>${km(s.d)}</b> ק"מ</span><span><b>${hms(s.ms)}</b></span><span><b>${s.avg.toFixed(1)}</b> קמ"ש</span></div>
+    <div class="ract"><button data-a="show">הצג במפה</button><button data-a="name">שנה שם</button><button data-a="gpx">GPX</button><button data-a="del">מחק</button></div>`;
+  li.querySelector('.rtitle').textContent = rideName(r);
+  li.querySelector('.ract').onclick = e => {
+    const a = e.target.dataset.a; if (!a) return;
+    if (a === 'show') { selected = r.id; drawRides([r]); renderList(); window.scrollTo({ top: 0, behavior: 'smooth' }); }
+    if (a === 'name') { const n = prompt('שם הנסיעה:', r.name || ''); if (n !== null) { r.name = n.trim(); save(); renderList(); } }
+    if (a === 'gpx') download(fileBase(r) + '.gpx', toGPX([r]), 'application/gpx+xml');
+    if (a === 'del' && confirm('למחוק את "' + rideName(r) + '"?')) { rides = rides.filter(x => x !== r); save(); renderList(); layer.clearLayers(); }
+  };
+  return li;
+}
+
+/* summaries by day / week (Sunday–Saturday) / month */
+let mode = lsGet('bikeListMode', 'rides'), openKey = null;
+const DAYS = ['ראשון', 'שני', 'שלישי', 'רביעי', 'חמישי', 'שישי', 'שבת'];
+function periodKey(t, m) {
+  const d = new Date(t); d.setHours(0, 0, 0, 0);
+  if (m === 'week') d.setDate(d.getDate() - d.getDay());
+  if (m === 'month') d.setDate(1);
+  return d.getTime();
+}
+function periodLabel(k, m) {
+  const d = new Date(k), ds = x => x.toLocaleDateString('he-IL');
+  if (m === 'day') return 'יום ' + DAYS[d.getDay()] + ', ' + ds(d);
+  if (m === 'week') { const e = new Date(k); e.setDate(e.getDate() + 6); return 'שבוע ' + ds(d) + ' – ' + ds(e); }
+  return d.toLocaleDateString('he-IL', { month: 'long', year: 'numeric' });
+}
+const isoDay = k => { const d = new Date(k); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); };
+function renderPeriods(ul) {
+  const groups = new Map();
+  [...rides].sort((a, b) => b.start - a.start).forEach(r => {
+    const k = periodKey(r.start, mode);
+    if (!groups.has(k)) groups.set(k, []);
+    groups.get(k).push(r);
+  });
+  groups.forEach((list, k) => {
+    let d = 0, ms = 0;
+    list.forEach(r => { const s = stats(r); d += s.d; ms += s.ms; });
+    const open = openKey === mode + k, li = document.createElement('li');
+    li.className = 'period' + (open ? ' open' : '');
+    li.innerHTML = `<button class="phead"><div class="rtitle">${periodLabel(k, mode)}</div>
+      <div class="rnums"><span><b>${list.length}</b> ${list.length === 1 ? 'נסיעה' : 'נסיעות'}</span><span><b>${km(d)}</b> ק"מ</span><span><b>${hms(ms)}</b></span><span><b>${(ms > 0 ? d / ms * 3600 : 0).toFixed(1)}</b> קמ"ש</span></div></button>`;
+    li.querySelector('.phead').onclick = () => {
+      openKey = open ? null : mode + k; selected = null;
+      if (!open) drawRides(list);
+      renderList();
     };
+    if (open) {
+      const body = document.createElement('div'); body.className = 'pbody';
+      body.innerHTML = '<div class="ract"><button data-a="map">הצג הכל במפה</button><button data-a="gpx">ייצוא GPX של התקופה</button></div><ul></ul>';
+      body.querySelector('.ract').onclick = e => {
+        const a = e.target.dataset.a;
+        if (a === 'map') { selected = null; drawRides(list); window.scrollTo({ top: 0, behavior: 'smooth' }); }
+        if (a === 'gpx') download('bike-' + mode + '-' + isoDay(k) + '.gpx', toGPX(list), 'application/gpx+xml');
+      };
+      list.forEach(r => body.querySelector('ul').appendChild(rideLi(r)));
+      li.appendChild(body);
+    }
     ul.appendChild(li);
   });
 }
+$('seg').onclick = e => {
+  const m = e.target.dataset.m; if (!m) return;
+  mode = m; openKey = null; lsSet('bikeListMode', m); renderList();
+};
 $('bAll').onclick = () => { selected = null; drawRides(rides); renderList(); window.scrollTo({ top: 0, behavior: 'smooth' }); };
 
 /* ---------- tabs ---------- */

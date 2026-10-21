@@ -7,3 +7,10 @@
   [headers.values]
     Content-Type = "application/vnd.android.package-archive"
     Content-Disposition = "attachment; filename=bikemy.apk"
+
+# read by the installed app to offer updates (app runs on https://localhost, so it needs CORS)
+[[headers]]
+  for = "/version.json"
+  [headers.values]
+    Access-Control-Allow-Origin = "*"
+    Cache-Control = "no-cache"
